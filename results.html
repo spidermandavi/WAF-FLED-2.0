@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>WAF-FLED! Tournaments</title>
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="style.css">
+
+  <style>
+    /* Tournament cards */
+    .tournament-list {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+
+    .tournament-card {
+      background: #1f2430;
+      border-radius: 10px;
+      padding: 1rem;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .tournament-card a {
+      color: #ffd54a;
+      text-decoration: none;
+      font-weight: 500;
+    }
+
+    .tournament-card a:hover {
+      text-decoration: underline;
+    }
+
+    .tournament-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 15px rgba(0,0,0,0.4);
+    }
+
+    h2.section-title {
+      margin-top: 2rem;
+    }
+  </style>
+</head>
+
+<body>
+<header>
+  <h1>🧇 WAF-FLED!</h1>
+  <nav>
+    <a href="index.html">Leaderboard</a>
+    <a href="results.html">Tournaments</a>
+    <a href="achievements.html">Achievements</a>
+  </nav>
+</header>
+
+<main>
+  <!-- Past tournaments -->
+  <h2 class="section-title">📜 Tournament History</h2>
+  <div class="tournament-list">
+    <div class="tournament-card">
+      <a href="https://lichess.org/tournament/ZLfbxNcu" target="_blank">
+        Weekly WAF-FLED #1 Arena
+      </a>
+    </div>
+  </div>
+
+  <!-- Future tournaments -->
+  <h2 class="section-title">⏳ Upcoming Tournaments</h2>
+  <div class="tournament-list">
+    <div class="tournament-card">
+      <a href="https://lichess.org/tournament/Z2DuzTxs" target="_blank">
+        Weekly WAF-FLED #2 Arena
+      </a>
+    </div>
+  </div>
+</main>
+</body>
+</html>
