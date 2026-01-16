@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>WAF-FLED! Achievements</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="style.css">
+
+<style>
+.loading {
+  text-align: center;
+  opacity: 0.8;
+  font-style: italic;
+  margin-top: 1rem;
+}
+.podium-slot.place-1 { background: gold; }
+.podium-slot.place-2 { background: silver; }
+.podium-slot.place-3 { background: #cd7f32; }
+.update-section { margin-bottom: 1rem; }
+.update-btn { padding: 0.5rem 1rem; cursor: pointer; border-radius:5px; border:none; background:#ffd54a; font-weight:bold; }
+.update-btn:hover { background:#ffca28; }
+
+/* Flash animation for podium values */
+@keyframes flashStat {
+  0% { transform: scale(1); opacity: 0.3; }
+  30% { transform: scale(1.5); opacity: 1; }
+  60% { transform: scale(1.2); opacity: 0.8; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.stat-flash {
+  display: inline-block;
+  animation: flashStat 0.8s ease;
+}
+</style>
+</head>
+<body>
+<header>
+<h1>🧇 WAF-FLED!</h1>
+<nav>
+<a href="index.html">Leaderboard</a>
+<a href="results.html">Tournaments</a>
+<a href="achievements.html">Achievements</a>
+</nav>
+</header>
+
+<main>
+<div class="update-section">
+  <button class="update-btn" id="updateBtn">🔄 Check for new tournaments</button>
+  <small id="updateNote">
+    Press only when needed. For example, after a tournament that happened just a little while ago. Frequent clicks may take a few seconds.
+  </small>
+</div>
+<small id="lastUpdated">Last updated on: --</small>
+
+<h2>🏆 Achievements</h2>
+
+<section>
+<h2>🧇 Most WAFFLES</h2>
+<div class="podium" id="podium-waffles"><p class="loading">Loading...</p></div>
+</section>
+
+<section>
+<h2>💥 Most WAFFLED</h2>
+<div class="podium" id="podium-waffled"><p class="loading">Loading...</p></div>
+</section>
+
+<section>
+<h2>📈 Most Committed</h2>
+<div class="podium" id="podium-committed"><p class="loading">Loading...</p></div>
+</section>
+
+<script>
+const TOURNAMENTS = ["ZLfbxNcu", "Z2DuzTxs"];
+const STORAGE_KEY = "wafDataLatestTmt";
+
+let cachedData = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+cachedData.players = cachedData.players || {};
+cachedData.fetchedTournaments = cachedData.fetchedTournaments || [];
+
+function parsePGN(pgn){
+  const white = pgn.match(/\[White "(.+?)"]/)[1];
+  const black = pgn.match(/\[Black "(.+?)"]/)[1];
+  const termination = pgn.match(/\[Termination "(.+?)"]/)?.[1] || "";
+
+  let whiteRes="draw", blackRes="draw";
+  if(pgn.includes("1-0")){whiteRes="win"; blackRes="loss";}
+  else if(pgn.includes("0-1")){whiteRes="loss"; blackRes="win";}
+  if(termination.includes("Time forfeit")){
+    if(whiteRes==="win") whiteRes="flag_win";
+    if(blackRes==="win") blackRes="flag_win";
+    if(whiteRes==="loss") whiteRes="flag_loss";
+    if(blackRes==="loss") blackRes="flag_loss";
+  }
+
+  return [
+    {name:white,res:whiteRes},
+    {name:black,res:blackRes}
+  ];
+}
+
+async function fetchGames(id){
+  try{
+    const r = await fetch(`https://lichess.org/api/tournament/${id}/games`);
+    const txt = await r.text();
+    return txt.split(/\n(?=\[Event)/).flatMap(parsePGN);
+  } catch { return []; }
+}
+
+// Build podium with optional diff highlighting
+function buildPodium(id,data,key,isGames=false,diffMap={}){
+  const medals=["🥇","🥈","🥉"];
+  const container = document.getElementById(id);
+  const top3 = [...data].sort((a,b)=>b[key]-a[key]).slice(0,3);
+
+  if(!top3.length){
+    container.innerHTML="<p class='loading'>No data yet</p>";
+    return;
+  }
+
+  container.innerHTML=top3.map((p,i)=>{
+    const diff = (diffMap[p.name] && diffMap[p.name][key]) || 0;
+    const color = diff>0?"green":diff<0?"red":"white";
+    const valueHTML = isGames
+      ? `<span class="stat-flash" style="color:${color}">${p[key]} games${diff>0?` (+${diff})`:''}</span>`
+      : `<span class="stat-flash" style="color:${color}">${p[key]}${diff>0?` (+${diff})`:''}</span>`;
+    
+    return `
+      <div class="podium-slot place-${i+1}">
+        <div class="trophy">${medals[i]}</div>
+        <div class="name">${p.name}</div>
+        <div class="value">${valueHTML}</div>
+      </div>
+    `;
+  }).join("");
+}
+
+async function buildAchievements(fetchNew=false){
+  const players = {...cachedData.players};
+  const diffMap = {}; // Track latest tournament gains
+
+  // Fetch tournaments in parallel
+  const gamesArrays = await Promise.all(TOURNAMENTS.map(async t=>{
+    if(!fetchNew && cachedData.fetchedTournaments.includes(t)) return [];
+    const g = await fetchGames(t);
+    cachedData.fetchedTournaments.push(t);
+    return g;
+  }));
+
+  const allGames = gamesArrays.flat();
+
+  allGames.forEach(g=>{
+    if(!players[g.name]) players[g.name]={name:g.name, waffles:0, waffled:0, games:0};
+
+    // Track previous totals
+    const prev = { waffles: players[g.name].waffles, waffled: players[g.name].waffled, games: players[g.name].games };
+
+    // Update totals
+    if(g.res==="flag_win") players[g.name].waffles++;
+    if(g.res==="flag_loss") players[g.name].waffled++;
+    players[g.name].games = (players[g.name].games||0)+1;
+
+    // Compute difference for latest tournament (exactly score if first tournament)
+    diffMap[g.name] = {
+      waffles: players[g.name].waffles - prev.waffles,
+      waffled: players[g.name].waffled - prev.waffled,
+      games: players[g.name].games - prev.games
+    };
+  });
+
+  const list = Object.values(players);
+  buildPodium("podium-waffles", list, "waffles", false, diffMap);
+  buildPodium("podium-waffled", list, "waffled", false, diffMap);
+  buildPodium("podium-committed", list, "games", true, diffMap);
+
+  cachedData.players = players;
+  cachedData.lastUpdated = Date.now();
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(cachedData));
+  document.getElementById("lastUpdated").innerText = "Last updated on: " + new Date(cachedData.lastUpdated).toLocaleString();
+}
+
+document.getElementById("updateBtn").addEventListener("click", ()=>buildAchievements(true));
+buildAchievements();
+</script>
+</body>
+</html>
