@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>WAF-FLED! Leaderboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>🧇 WAF-FLED!</h1>
+  <nav>
+    <a href="index.html">Leaderboard</a>
+    <a href="results.html">Tournaments</a>
+    <a href="achievements.html">Achievements</a>
+  </nav>
+</header>
+
+<main>
+  <div class="update-section">
+    <button class="update-btn" id="updateBtn">🔄 Check for new tournaments</button>
+    <small id="updateNote">⚠️ Press only when needed. Frequent clicks may take a few seconds.</small>
+  </div>
+  <small id="lastUpdated">Last updated on: --</small>
+
+  <!-- Desktop leaderboard -->
+  <table id="leaderboard" class="leaderboard-table">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Username</th>
+        <th>Score</th>
+        <th>Highest Rank</th>
+        <th>🧇</th>
+        <th>💥</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <!-- Mobile leaderboard -->
+  <div id="leaderboardCards" class="leaderboard-cards"></div>
+</main>
+
+<script>
+const TOURNAMENTS = ["ZLfbxNcu","Z2DuzTxs"];
+let cachedData = JSON.parse(localStorage.getItem("wafData")) || { players:{}, lastUpdated:null };
+
+function scoreGame(type, berserk, oppBerserk){
+  if(type==="win") return berserk?1.5:1;
+  if(type==="loss") return -1;
+  if(type==="flag_win") return berserk?3:2;
+  if(type==="flag_loss") return oppBerserk?-3:-2;
+  return 0;
+}
+
+function parsePGN(pgn){
+  const white = pgn.match(/\[White "(.+?)"]/)[1];
+  const black = pgn.match(/\[Black "(.+?)"]/)[1];
+  const whiteB = /\[WhiteBerserk "1"]/.test(pgn);
+  const blackB = /\[BlackBerserk "1"]/.test(pgn);
+  const termination = pgn.match(/\[Termination "(.+?)"]/)?.[1]||"";
+
+  let whiteRes="draw", blackRes="draw";
+  if(pgn.includes("1-0")){whiteRes="win"; blackRes="loss";}
+  else if(pgn.includes("0-1")){whiteRes="loss"; blackRes="win";}
+  if(termination.includes("Time forfeit")){
+    if(whiteRes==="win") whiteRes="flag_win";
+    if(blackRes==="win") blackRes="flag_win";
+    if(whiteRes==="loss") whiteRes="flag_loss";
+    if(blackRes==="loss") blackRes="flag_loss";
+  }
+  return [
+    {name:white,res:whiteRes,berserk:whiteB,oppB:blackB},
+    {name:black,res:blackRes,berserk:blackB,oppB:whiteB}
+  ];
+}
+
+async function fetchGames(id){
+  try {
+    const r = await fetch(`https://lichess.org/api/tournament/${id}/games`);
+    const txt = await r.text();
+    return txt.split(/\n(?=\[Event)/).flatMap(parsePGN);
+  } catch { return []; }
+}
+
+function render(){
+  const players = cachedData.players;
+  const list = Object.values(players).sort((a,b)=>b.score-a.score);
+  const tbody = document.querySelector("#leaderboard tbody");
+  const cards = document.querySelector("#leaderboardCards");
+
+  tbody.innerHTML="";
+  cards.innerHTML="";
+
+  if(!list.length){
+    tbody.innerHTML=`<tr><td colspan="6" class="loading"><div class="spinner"></div>Loading...</td></tr>`;
+    cards.innerHTML=`<div class="loading"><div class="spinner"></div>Loading...</div>`;
+    return;
+  }
+
+  list.forEach((p,i)=>{
+    tbody.innerHTML+=`
+      <tr>
+        <td>${i+1}</td>
+        <td>${p.name}</td>
+        <td>${p.score}</td>
+        <td>${p.highestRank||i+1}</td>
+        <td>${p.waffles||0}</td>
+        <td>${p.waffled||0}</td>
+      </tr>
+    `;
+
+    cards.innerHTML+=`
+      <div class="player-card">
+        <div class="card-top">
+          <span class="rank">#${i+1}</span>
+          <span class="username">${p.name}</span>
+        </div>
+        <div class="card-stats">
+          <span>Score <b>${p.score}</b></span>
+          <span>HR <b>${p.highestRank||i+1}</b></span>
+          <span>🧇 ${p.waffles||0}</span>
+          <span>💥 ${p.waffled||0}</span>
+        </div>
+      </div>
+    `;
+  });
+
+  const lastUpdated = cachedData.lastUpdated ? new Date(cachedData.lastUpdated).toLocaleString():"--";
+  document.getElementById("lastUpdated").innerText=`Last updated on: ${lastUpdated}`;
+}
+
+async function updateData(){
+  document.getElementById("updateBtn").disabled=true;
+  document.getElementById("updateBtn").innerText="Loading...";
+
+  const players = cachedData.players||{};
+
+  for(const t of TOURNAMENTS){
+    const games = await fetchGames(t);
+    games.forEach(g=>{
+      if(!players[g.name]) players[g.name]={name:g.name,score:0,waffles:0,waffled:0,highestRank:null,games:0};
+      players[g.name].score+=scoreGame(g.res,g.berserk,g.oppB);
+      if(g.res==="flag_win") players[g.name].waffles++;
+      if(g.res==="flag_loss") players[g.name].waffled++;
+      players[g.name].games++;
+    });
+
+    // Update highest rank after sorting
+    const sorted = Object.values(players).sort((a,b)=>b.score-a.score);
+    sorted.forEach((p,i)=>{
+      if(p.highestRank===null || i+1<p.highestRank) p.highestRank=i+1;
+    });
+  }
+
+  cachedData.players=players;
+  cachedData.lastUpdated=Date.now();
+  localStorage.setItem("wafData",JSON.stringify(cachedData));
+  render();
+
+  document.getElementById("updateBtn").disabled=false;
+  document.getElementById("updateBtn").innerText="🔄 Check for new tournaments";
+}
+
+document.getElementById("updateBtn").addEventListener("click",updateData);
+render();
+</script>
+</body>
+</html>
