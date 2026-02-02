@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>WAF-FLED! Leaderboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="style.css">
+
+<style>
+.loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  padding: 1rem;
+  font-style: italic;
+  opacity: 0.8;
+}
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 3px solid #444;
+  border-top: 3px solid #ffd54a;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+#lastUpdated {
+  font-size: 0.85rem;
+  color: #aaa;
+  margin: 0.5rem 0 1rem;
+  text-align: center;
+}
+
+@keyframes flashDelta {
+  0% { transform: scale(1); opacity: 0.3; }
+  30% { transform: scale(1.5); opacity: 1; }
+  60% { transform: scale(1.2); opacity: 0.8; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.delta-flash {
+  display: inline-block;
+  animation: flashDelta 0.8s ease;
+}
+</style>
+</head>
+
+<body>
+<header>
+<h1>🧇 WAF-FLED!</h1>
+<nav>
+<a href="index.html">Leaderboard</a>
+<a href="results.html">Tournaments</a>
+<a href="achievements.html">Achievements</a>
+</nav>
+</header>
+
+<main>
+<div id="lastUpdated">Last updated: --</div>
+
+<table id="leaderboard" class="leaderboard-table">
+<thead>
+<tr>
+<th>#</th>
+<th>Username</th>
+<th>Score</th>
+<th>🧇 Waffles</th>
+<th>💥 Waffled</th>
+<th>Highest Rank</th>
+<th>Δ Score</th>
+</tr>
+</thead>
+<tbody></tbody>
+</table>
+
+<div id="leaderboardCards" class="leaderboard-cards"></div>
+</main>
+
+<script>
+// ================= CONFIG =================
+const MANUAL_TOURNAMENTS = [
+  "ZLfbxNcu",
+  "Z2DuzTxs",
+  "O4X6VErR",
+  "HVMkt9VQ",
+  "NmRTO3Nr",
+  "wIUsm1em"
+];
+
+const TEAM_SLUG = "world-antichess-front";
+const NAME_REGEX = /^Weekly WAF-FLED \d+ Arena$/;
+
+// ================= SCORING =================
+function scoreGame(type, berserk, oppB) {
+  if (type === "win") return berserk ? 1.5 : 1;
+  if (type === "loss") return -1;
+  if (type === "flag_win") return berserk ? 3 : 2;
+  if (type === "flag_loss") return oppB ? -3 : -2;
+  return 0;
+}
+
+// ================= PGN PARSER =================
+function parsePGN(pgn) {
+  const white = pgn.match(/\[White "(.+?)"]/)[1];
+  const black = pgn.match(/\[Black "(.+?)"]/)[1];
+  const whiteB = /\[WhiteBerserk "1"]/.test(pgn);
+  const blackB = /\[BlackBerserk "1"]/.test(pgn);
+  const termination = pgn.match(/\[Termination "(.+?)"]/)?.[1] || "";
+
+  let whiteRes = "draw", blackRes = "draw";
+  if (pgn.includes("1-0")) { whiteRes = "win"; blackRes = "loss"; }
+  else if (pgn.includes("0-1")) { whiteRes = "loss"; blackRes = "win"; }
+
+  if (termination.includes("Time forfeit")) {
+    if (whiteRes === "win") whiteRes = "flag_win";
+    if (blackRes === "win") blackRes = "flag_win";
+    if (whiteRes === "loss") whiteRes = "flag_loss";
+    if (blackRes === "loss") blackRes = "flag_loss";
+  }
+
+  return [
+    { name: white, res: whiteRes, berserk: whiteB, oppB: blackB },
+    { name: black, res: blackRes, berserk: blackB, oppB: whiteB }
+  ];
+}
+
+// ================= FETCH TEAM TOURNAMENTS (FIXED) =================
+async function fetchTeamTournaments(){
+  try {
+    const res = await fetch(`https://lichess.org/api/team/${TEAM_SLUG}/tournaments`);
+    const text = await res.text();
+
+    let tournaments = [];
+    try {
+      const jsonArray = JSON.parse(text);
+      if (Array.isArray(jsonArray)) tournaments = jsonArray;
+    } catch {
+      tournaments = text
+        .trim()
+        .split("\n")
+        .map(line => JSON.parse(line));
+    }
+
+    return tournaments.filter(t => NAME_REGEX.test(t.name));
+  } catch {
+    return [];
+  }
+}
+
+// ================= FETCH GAMES =================
+async function fetchGames(id) {
+  try {
+    const r = await fetch(`https://lichess.org/api/tournament/${id}/games`);
+    const txt = await r.text();
+    if (!txt.trim()) return [];
+    return txt.split(/\n(?=\[Event)/).flatMap(parsePGN);
+  } catch {
+    return [];
+  }
+}
+
+// ================= RENDER =================
+function render(players, deltaScores = {}) {
+  const list = Object.values(players).sort((a,b)=>b.score-a.score);
+  const tbody = document.querySelector("#leaderboard tbody");
+  const cards = document.querySelector("#leaderboardCards");
+
+  tbody.innerHTML = "";
+  cards.innerHTML = "";
+
+  if (!list.length) {
+    tbody.innerHTML = `<tr><td colspan="7" class="loading"><div class="spinner"></div>Loading...</td></tr>`;
+    cards.innerHTML = `<div class="loading"><div class="spinner"></div>Loading...</div>`;
+    return;
+  }
+
+  list.forEach((p,i)=>{
+    const delta = deltaScores[p.name] || 0;
+    const color = delta>0?"green":delta<0?"red":"white";
+    const deltaSpan = `<span class="delta-flash" style="color:${color}">${delta>0?"+":""}${delta}</span>`;
+
+    tbody.innerHTML += `
+      <tr>
+        <td>${i+1}</td>
+        <td>${p.name}</td>
+        <td>${p.score}</td>
+        <td>${p.waffles||0}</td>
+        <td>${p.waffled||0}</td>
+        <td>${i+1}</td>
+        <td>${deltaSpan}</td>
+      </tr>
+    `;
+
+    cards.innerHTML += `
+      <div class="player-card">
+        <div class="card-top"><span class="rank">#${i+1}</span> <span class="username">${p.name}</span></div>
+        <div class="card-stats">
+          <span>Score <b>${p.score}</b></span>
+          <span>🧇 ${p.waffles||0}</span>
+          <span>💥 ${p.waffled||0}</span>
+          <span>Highest Rank: ${i+1}</span>
+          <span>${deltaSpan}</span>
+        </div>
+      </div>
+    `;
+  });
+}
+
+// ================= BUILD =================
+async function buildLeaderboard() {
+  let players = {};
+  render(players);
+
+  const teamIds = await fetchTeamTournaments();
+  const TOURNAMENTS = [...new Set([...MANUAL_TOURNAMENTS, ...teamIds])];
+
+  const allGamesArrays = await Promise.all(TOURNAMENTS.map(fetchGames));
+  const allGames = allGamesArrays.flat();
+
+  allGames.forEach(g=>{
+    if(!players[g.name]) players[g.name]={name:g.name, score:0, waffles:0, waffled:0};
+    players[g.name].score += scoreGame(g.res,g.berserk,g.oppB);
+    if(g.res==="flag_win") players[g.name].waffles++;
+    if(g.res==="flag_loss") players[g.name].waffled++;
+  });
+
+  render(players);
+  document.getElementById("lastUpdated").innerText =
+    "Last updated: " + new Date().toLocaleString();
+}
+
+// AUTO LOAD
+buildLeaderboard();
+</script>
+</body>
+</html>
