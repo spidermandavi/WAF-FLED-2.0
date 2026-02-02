@@ -19,6 +19,29 @@ function scoreGame(type, berserk, oppB) {
   return 0;
 }
 
+// ================= FETCH TEAM TOURNAMENTS =================
+async function fetchTeamTournaments() {
+  try {
+    const res = await fetch(`https://lichess.org/api/team/${TEAM_SLUG}/tournaments`);
+    const text = await res.text();
+
+    let tournaments = [];
+    try {
+      const jsonArray = JSON.parse(text);
+      if (Array.isArray(jsonArray)) tournaments = jsonArray;
+    } catch {
+      tournaments = text
+        .trim()
+        .split("\n")
+        .map(line => JSON.parse(line));
+    }
+
+    return tournaments.filter(t => NAME_REGEX.test(t.name));
+  } catch {
+    return [];
+  }
+}
+
 // ================= PGN PARSER =================
 function parsePGN(pgn) {
   const white = pgn.match(/\[White "(.+?)"]/)[1];
@@ -44,45 +67,72 @@ function parsePGN(pgn) {
   ];
 }
 
-// ================= FETCH =================
+// ================= FETCH GAMES =================
 async function fetchGames(id) {
   try {
-    const r = await fetch(`https://lichess.org/api/tournament/${id}/games`);
-    const txt = await r.text();
-    if (!txt.trim()) return [];
-    return txt.split(/\n(?=\[Event)/).flatMap(parsePGN);
+    const res = await fetch(`https://lichess.org/api/tournament/${id}/games`);
+    const text = await res.text();
+    if (!text.trim()) return [];
+    return text.split(/\n(?=\[Event)/).flatMap(parsePGN);
   } catch {
     return [];
   }
 }
 
-async function fetchTeamTournaments() {
-  try {
-    const r = await fetch(`https://lichess.org/api/team/${TEAM_SLUG}/tournaments`);
-    const text = await r.text();
+// ================= RENDER TOURNAMENTS =================
+function renderTournaments(tournaments, containerId, lastUpdatedId) {
+  const container = document.getElementById(containerId);
+  if (!tournaments.length) {
+    container.innerHTML = "<p class='loading'>No tournaments found</p>";
+    return;
+  }
 
-    let tournaments = [];
-    try {
-      const jsonArray = JSON.parse(text);
-      if (Array.isArray(jsonArray)) tournaments = jsonArray;
-    } catch {
-      tournaments = text
-        .trim()
-        .split("\n")
-        .map(line => JSON.parse(line));
-    }
+  tournaments.sort((a,b) => b.startsAt - a.startsAt);
 
-    return tournaments.filter(t => NAME_REGEX.test(t.name));
-  } catch {
-    return [];
+  container.innerHTML = tournaments.map(t => {
+    const endTime = new Date(t.finishesAt || t.endsAt || t.startsAt);
+    const isPast = t.status === "finished" || endTime < new Date();
+    const statusClass = isPast ? "status-past" : "status-future";
+    const statusText = isPast ? "Finished" : "Upcoming";
+
+    return `
+      <div class="tournament-box">
+        <a href="https://lichess.org/tournament/${t.id}" target="_blank">${t.name}</a>
+        <span class="tournament-status ${statusClass}">${statusText}</span>
+        <span>${isPast ? "Ended" : "Starts"}: ${new Date(t.startsAt).toLocaleString()}</span>
+      </div>
+    `;
+  }).join("");
+
+  if (lastUpdatedId) {
+    document.getElementById(lastUpdatedId).innerText =
+      "Last updated on: " + new Date().toLocaleString();
   }
 }
 
-// ================= LEADERBOARD =================
-function renderLeaderboard(players, deltaScores = {}) {
-  const list = Object.values(players).sort((a,b)=>b.score-a.score);
-  const tbody = document.querySelector("#leaderboard tbody");
-  const cards = document.querySelector("#leaderboardCards");
+// ================= BUILD LEADERBOARD =================
+async function buildLeaderboard(tbodyId = "leaderboard", cardsId = "leaderboardCards", lastUpdatedId = "lastUpdated") {
+  const players = {};
+  const teamTournaments = await fetchTeamTournaments();
+  const TOURNAMENTS = [...new Set([...MANUAL_TOURNAMENTS, ...teamTournaments.map(t => t.id)])];
+
+  const allGamesArrays = await Promise.all(TOURNAMENTS.map(fetchGames));
+  const allGames = allGamesArrays.flat();
+
+  allGames.forEach(g => {
+    if (!players[g.name]) players[g.name] = { name: g.name, score: 0, waffles: 0, waffled: 0 };
+    players[g.name].score += scoreGame(g.res, g.berserk, g.oppB);
+    if (g.res === "flag_win") players[g.name].waffles++;
+    if (g.res === "flag_loss") players[g.name].waffled++;
+  });
+
+  renderLeaderboard(players, tbodyId, cardsId, lastUpdatedId);
+}
+
+function renderLeaderboard(players, tbodyId, cardsId, lastUpdatedId) {
+  const list = Object.values(players).sort((a,b) => b.score - a.score);
+  const tbody = document.querySelector(`#${tbodyId} tbody`);
+  const cards = document.getElementById(cardsId);
 
   tbody.innerHTML = "";
   cards.innerHTML = "";
@@ -93,143 +143,92 @@ function renderLeaderboard(players, deltaScores = {}) {
     return;
   }
 
-  list.forEach((p,i)=>{
-    const delta = deltaScores[p.name] || 0;
-    const color = delta>0?"green":delta<0?"red":"white";
-    const deltaSpan = `<span class="delta-flash" style="color:${color}">${delta>0?"+":""}${delta}</span>`;
-
+  list.forEach((p,i) => {
     tbody.innerHTML += `
       <tr>
         <td>${i+1}</td>
         <td>${p.name}</td>
         <td>${p.score}</td>
-        <td>${p.waffles||0}</td>
-        <td>${p.waffled||0}</td>
+        <td>${p.waffles || 0}</td>
+        <td>${p.waffled || 0}</td>
         <td>${i+1}</td>
-        <td>${deltaSpan}</td>
+        <td>--</td>
       </tr>
     `;
 
-    if(cards) {
+    if (cards) {
       cards.innerHTML += `
         <div class="player-card">
           <div class="card-top"><span class="rank">#${i+1}</span> <span class="username">${p.name}</span></div>
           <div class="card-stats">
             <span>Score <b>${p.score}</b></span>
-            <span>🧇 ${p.waffles||0}</span>
-            <span>💥 ${p.waffled||0}</span>
+            <span>🧇 ${p.waffles || 0}</span>
+            <span>💥 ${p.waffled || 0}</span>
             <span>Highest Rank: ${i+1}</span>
-            <span>${deltaSpan}</span>
           </div>
         </div>
       `;
     }
   });
+
+  if (lastUpdatedId) document.getElementById(lastUpdatedId).innerText =
+    "Last updated: " + new Date().toLocaleString();
 }
 
-async function buildLeaderboard() {
-  const tbody = document.querySelector("#leaderboard tbody");
-  if(tbody) tbody.innerHTML = "<tr><td colspan='7' class='loading'>Loading...</td></tr>";
-
-  const teamIds = await fetchTeamTournaments();
-  const TOURNAMENTS = [...new Set([...MANUAL_TOURNAMENTS, ...teamIds])];
-  const allGamesArrays = await Promise.all(TOURNAMENTS.map(fetchGames));
-  const allGames = allGamesArrays.flat();
-
-  let players = {};
-  allGames.forEach(g=>{
-    if(!players[g.name]) players[g.name]={name:g.name, score:0, waffles:0, waffled:0};
-    players[g.name].score += scoreGame(g.res,g.berserk,g.oppB);
-    if(g.res==="flag_win") players[g.name].waffles++;
-    if(g.res==="flag_loss") players[g.name].waffled++;
-  });
-
-  renderLeaderboard(players);
-
-  const lastUpdatedEl = document.getElementById("lastUpdated");
-  if(lastUpdatedEl) lastUpdatedEl.innerText = "Last updated: " + new Date().toLocaleString();
-}
-
-// ================= ACHIEVEMENTS =================
-function buildPodium(id,data,key,isGames=false){
-  const medals=["🥇","🥈","🥉"];
-  const container=document.getElementById(id);
-
-  if(!container) return;
-
-  const top3=[...data].sort((a,b)=>b[key]-a[key]).slice(0,3);
-  if(!top3.length){
-    container.innerHTML="<p class='loading'>No data yet</p>";
-    return;
-  }
-
-  container.innerHTML=top3.map((p,i)=>`
-    <div class="podium-slot place-${i+1}">
-      <div class="trophy">${medals[i]}</div>
-      <div class="name">${p.name}</div>
-      <div class="value stat-flash">
-        ${p[key]}${isGames?" games":""}
-      </div>
-    </div>
-  `).join("");
-}
-
+// ================= BUILD ACHIEVEMENTS =================
 async function buildAchievements() {
   const players = {};
-  document.querySelectorAll(".podium").forEach(p=>p.innerHTML="<p class='loading'>Loading...</p>");
+  const podiums = ["podium-waffles", "podium-waffled", "podium-committed"];
+  podiums.forEach(id => document.getElementById(id)?.innerHTML = "<p class='loading'>Loading...</p>");
 
-  const tmtIds = await fetchTeamTournaments();
-  const gamesArrays = await Promise.all(tmtIds.map(fetchGames));
-  const allGames = gamesArrays.flat();
+  const teamTournaments = await fetchTeamTournaments();
+  const allGamesArrays = await Promise.all(teamTournaments.map(t => fetchGames(t.id)));
+  const allGames = allGamesArrays.flat();
 
-  allGames.forEach(g=>{
-    if(!players[g.name]) players[g.name]={name:g.name, waffles:0, waffled:0, games:0};
-    if(g.res==="flag_win") players[g.name].waffles++;
-    if(g.res==="flag_loss") players[g.name].waffled++;
+  allGames.forEach(g => {
+    if (!players[g.name]) players[g.name] = { name: g.name, waffles: 0, waffled: 0, games: 0 };
+    if (g.res === "flag_win") players[g.name].waffles++;
+    if (g.res === "flag_loss") players[g.name].waffled++;
     players[g.name].games++;
   });
 
   const list = Object.values(players);
+
   buildPodium("podium-waffles", list, "waffles");
   buildPodium("podium-waffled", list, "waffled");
   buildPodium("podium-committed", list, "games", true);
 
   const lastUpdatedEl = document.getElementById("lastUpdated");
-  if(lastUpdatedEl) lastUpdatedEl.innerText = "Last updated on: " + new Date().toLocaleString();
+  if (lastUpdatedEl) lastUpdatedEl.innerText = "Last updated on: " + new Date().toLocaleString();
 }
 
-// ================= TOURNAMENTS =================
-async function buildTournaments(){
-  const container = document.getElementById("tournamentContainer");
-  if(container) container.innerHTML = '<p class="loading">Loading tournaments...</p>';
+// ================= BUILD PODIUM =================
+function buildPodium(id, data, key, isGames = false) {
+  const container = document.getElementById(id);
+  if (!container) return;
 
-  const tournaments = await fetchTeamTournaments();
-  if(container) container.innerHTML = "";
+  const medals = ["🥇", "🥈", "🥉"];
+  const top3 = [...data].sort((a,b) => b[key] - a[key]).slice(0,3);
 
-  tournaments.sort((a,b)=>b.startsAt - a.startsAt);
+  if (!top3.length) {
+    container.innerHTML = "<p class='loading'>No data yet</p>";
+    return;
+  }
 
-  tournaments.forEach(t=>{
-    const endTime = new Date(t.finishesAt || t.endsAt || t.startsAt);
-    const isPast = t.status === "finished" || endTime < new Date();
-    const statusClass = isPast ? "status-past" : "status-future";
-    const statusText = isPast ? "Finished" : "Upcoming";
-
-    if(container) container.innerHTML += `
-      <div class="tournament-box">
-        <a href="https://lichess.org/tournament/${t.id}" target="_blank">${t.name}</a>
-        <span class="tournament-status ${statusClass}">${statusText}</span>
-        <span>${isPast ? "Ended" : "Starts"}: ${new Date(t.startsAt).toLocaleString()}</span>
-      </div>
-    `;
-  });
-
-  const lastUpdatedEl = document.getElementById("lastUpdated");
-  if(lastUpdatedEl) lastUpdatedEl.innerText = "Last updated on: " + new Date().toLocaleString();
+  container.innerHTML = top3.map((p,i) => `
+    <div class="podium-slot place-${i+1}">
+      <div class="trophy">${medals[i]}</div>
+      <div class="name">${p.name}</div>
+      <div class="value stat-flash">${p[key]}${isGames ? " games" : ""}</div>
+    </div>
+  `).join("");
 }
 
-// ================= AUTO LOAD =================
-document.addEventListener("DOMContentLoaded", ()=>{
-  buildLeaderboard();
-  buildAchievements();
-  buildTournaments();
-});
+// ================= EXPORT FUNCTIONS =================
+// For pages to call after DOM load
+window.WAF_API = {
+  buildLeaderboard,
+  buildAchievements,
+  fetchTeamTournaments,
+  renderTournaments
+};
