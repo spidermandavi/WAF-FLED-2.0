@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>WAF-FLED! Tournaments</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="style.css">
+
+<style>
+.tournament-wrapper {
+  display:flex;
+  flex-wrap:wrap;
+  gap:2rem;
+  margin-top:1rem;
+}
+
+.column {
+  flex:1 1 300px;
+}
+
+.column h2 {
+  margin-bottom:1rem;
+}
+
+.tournament-box {
+  background:#1f2430;
+  border-radius:10px;
+  padding:1rem;
+  margin-bottom:1rem;
+  box-shadow:0 4px 10px rgba(0,0,0,0.3);
+  transition: transform 0.2s;
+}
+
+.tournament-box:hover {
+  transform:scale(1.03);
+}
+
+.tournament-box a {
+  text-decoration:none;
+  font-weight:bold;
+  color:white;
+}
+
+.finished .tournament-box {
+  border-left:6px solid #4caf50;
+}
+
+.upcoming .tournament-box {
+  border-left:6px solid #ffd54a;
+}
+</style>
+</head>
+
+<body>
+<header>
+<h1>🧇 WAF-FLED!</h1>
+<nav>
+<a href="index.html">Leaderboard</a>
+<a href="results.html">Tournaments</a>
+<a href="achievements.html">Achievements</a>
+</nav>
+</header>
+
+<main>
+
+<div class="tournament-wrapper">
+
+  <div class="column finished">
+    <h2>🟢 Finished Tournaments</h2>
+    <div id="finishedContainer"></div>
+  </div>
+
+  <div class="column upcoming">
+    <h2>🟡 Upcoming Tournaments</h2>
+    <div id="upcomingContainer"></div>
+  </div>
+
+</div>
+
+</main>
+
+<script>
+
+// =========================
+// EDIT HERE ONLY
+// =========================
+
+const FINISHED_TOURNAMENTS = [
+  "ZLfbxNcu",
+  "Z2DuzTxs",
+  "O4X6VErR",
+  "HVMkt9VQ",
+  "NmRTO3Nr"
+];
+
+const UPCOMING_TOURNAMENTS = [
+  "wIUsm1em"
+];
+
+// =========================
+// DO NOT TOUCH BELOW
+// =========================
+
+function createBox(id, number){
+  return `
+    <div class="tournament-box">
+      <a href="https://lichess.org/tournament/${id}" target="_blank">
+        WAF-FLED #${number}
+      </a>
+      <div style="opacity:0.6; font-size:0.85rem;">
+        ID: ${id}
+      </div>
+    </div>
+  `;
+}
+
+function renderList(list, containerId){
+  const container = document.getElementById(containerId);
+  container.innerHTML = "";
+
+  list.forEach((id, index) => {
+    container.innerHTML += createBox(id, index + 1);
+  });
+}
+
+renderList(FINISHED_TOURNAMENTS, "finishedContainer");
+renderList(UPCOMING_TOURNAMENTS, "upcomingContainer");
+
+</script>
+
+</body>
+</html>
