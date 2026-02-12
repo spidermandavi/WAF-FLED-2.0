@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>WAF-FLED! Team Battles</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="style.css">
+
+<style>
+.loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  padding: 1rem;
+  font-style: italic;
+  opacity: 0.8;
+}
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 3px solid #444;
+  border-top: 3px solid #ffd54a;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+#lastUpdated {
+  font-size: 0.85rem;
+  color: #aaa;
+  margin: 0.5rem 0 1rem;
+  text-align: center;
+}
+
+@keyframes flashDelta {
+  0% { transform: scale(1); opacity: 0.3; }
+  30% { transform: scale(1.5); opacity: 1; }
+  60% { transform: scale(1.2); opacity: 0.8; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.delta-flash { display: inline-block; animation: flashDelta 0.8s ease; }
+
+.delta-pos { color: #4caf50; }
+.delta-neg { color: #f44336; }
+.delta-zero { color: #aaa; }
+
+.team-row { cursor: pointer; }
+.team-details { background: #14161b; }
+</style>
+</head>
+
+<body>
+<header>
+<h1>🧇 WAF-FLED!</h1>
+<nav>
+<a href="index.html">Leaderboard</a>
+<a href="results.html">Tournaments</a>
+<a href="achievements.html">Achievements</a>
+<a href="team-battles.html">Team Battles</a>
+</nav>
+</header>
+
+<main>
+<div id="lastUpdated">Last updated: --</div>
+
+<table id="teamboard" class="leaderboard-table">
+<thead>
+<tr>
+<th>#</th>
+<th>Team</th>
+<th>Score</th>
+<th>🧇</th>
+<th>💥</th>
+<th>Highest Rank</th>
+<th>Δ Score</th>
+</tr>
+</thead>
+<tbody></tbody>
+</table>
+</main>
+
+<script>
+// ===== TEAM CONFIG =====
+const TEAM_BATTLES = [
+  "nC1n2poH"
+];
+
+// ===== SCORE LOGIC =====
+function scoreGame(type, berserk, oppB){
+  if(type==="win") return berserk?1.5:1;
+  if(type==="loss") return -1;
+  if(type==="flag_win") return berserk?3:2;
+  if(type==="flag_loss") return oppB?-3:-2;
+  return 0;
+}
+
+// ===== PARSE PGN =====
+function parsePGN(pgn){
+  const white = pgn.match(/\[White "(.+?)"]/)[1];
+  const black = pgn.match(/\[Black "(.+?)"]/)[1];
+
+  const whiteTeam = pgn.match(/\[WhiteTeam "(.+?)"]/)?.[1] || "No Team";
+  const blackTeam = pgn.match(/\[BlackTeam "(.+?)"]/)?.[1] || "No Team";
+
+  const whiteB = /\[WhiteBerserk "1"]/.test(pgn);
+  const blackB = /\[BlackBerserk "1"]/.test(pgn);
+
+  const termination = pgn.match(/\[Termination "(.+?)"]/)?.[1] || "";
+
+  let whiteRes="draw", blackRes="draw";
+  if(pgn.includes("1-0")) { whiteRes="win"; blackRes="loss"; }
+  else if(pgn.includes("0-1")) { whiteRes="loss"; blackRes="win"; }
+
+  if(termination.includes("Time forfeit")){
+    if(whiteRes==="win") whiteRes="flag_win";
+    if(blackRes==="win") blackRes="flag_win";
+    if(whiteRes==="loss") whiteRes="flag_loss";
+    if(blackRes==="loss") blackRes="flag_loss";
+  }
+
+  return [
+    {team:whiteTeam,name:white,res:whiteRes,berserk:whiteB,oppB:blackB},
+    {team:blackTeam,name:black,res:blackRes,berserk:blackB,oppB:whiteB}
+  ];
+}
+
+// ===== FETCH =====
+async function fetchGames(id){
+  try {
+    const r = await fetch(`https://lichess.org/api/tournament/${id}/games`);
+    const txt = await r.text();
+    if(!txt.trim()) return [];
+    return txt.split(/\n(?=\[Event)/).flatMap(parsePGN);
+  } catch { return []; }
+}
+
+// ===== RENDER PLAYER BREAKDOWN =====
+function renderTeamPlayers(players){
+  const list = Object.values(players).sort((a,b)=>b.score-a.score);
+
+  let html = `
+  <table style="width:100%; margin-top:10px;">
+    <tr>
+      <th>Player</th>
+      <th>Score</th>
+      <th>🧇</th>
+      <th>💥</th>
+    </tr>`;
+
+  list.forEach(p=>{
+    html += `
+    <tr>
+      <td>${p.name}</td>
+      <td>${p.score}</td>
+      <td>${p.waffles||0}</td>
+      <td>${p.waffled||0}</td>
+    </tr>`;
+  });
+
+  html += "</table>";
+  return html;
+}
+
+// ===== RENDER =====
+function render(teams, loading=true){
+  const list = Object.values(teams).sort((a,b)=>b.score-a.score);
+
+  list.forEach((t,i)=>{
+    const rank = i + 1;
+    if(rank < t.highestRank) t.highestRank = rank;
+  });
+
+  const tbody = document.querySelector("#teamboard tbody");
+  tbody.innerHTML="";
+
+  if(!list.length){
+    tbody.innerHTML=`<tr><td colspan="7" class="loading">
+    <div class="spinner"></div>Waiting for team battle...</td></tr>`;
+    return;
+  }
+
+  list.forEach((t,i)=>{
+    const delta = t.delta || 0;
+    const deltaClass =
+      delta > 0 ? "delta-pos" :
+      delta < 0 ? "delta-neg" :
+      "delta-zero";
+
+    const deltaSpan =
+      `<span class="delta-flash ${deltaClass}">
+        ${delta>0?"+":""}${delta}
+      </span>`;
+
+    const teamRow = document.createElement("tr");
+    teamRow.classList.add("team-row");
+
+    teamRow.innerHTML = `
+      <td>${i+1}</td>
+      <td>▶ ${t.name}</td>
+      <td>${t.score}</td>
+      <td>${t.waffles||0}</td>
+      <td>${t.waffled||0}</td>
+      <td>${t.highestRank === Infinity ? "-" : t.highestRank}</td>
+      <td>${deltaSpan}</td>
+    `;
+
+    const detailRow = document.createElement("tr");
+    detailRow.classList.add("team-details");
+    detailRow.style.display = "none";
+    detailRow.innerHTML = `
+      <td colspan="7">
+        ${renderTeamPlayers(t.players)}
+      </td>
+    `;
+
+    teamRow.addEventListener("click", ()=>{
+      const open = detailRow.style.display === "table-row";
+      detailRow.style.display = open ? "none" : "table-row";
+      teamRow.children[1].innerText =
+        (open ? "▶ " : "▼ ") + t.name;
+    });
+
+    tbody.appendChild(teamRow);
+    tbody.appendChild(detailRow);
+  });
+}
+
+// ===== BUILD =====
+async function buildTeamBoard(){
+  const teams = {};
+  render(teams);
+
+  for(const [index,battle] of TEAM_BATTLES.entries()){
+
+    Object.values(teams).forEach(t => t.lastScore = t.score);
+
+    const games = await fetchGames(battle);
+
+    games.forEach(g=>{
+      if(!teams[g.team]){
+        teams[g.team] = {
+          name: g.team,
+          score: 0,
+          waffles: 0,
+          waffled: 0,
+          highestRank: Infinity,
+          lastScore: 0,
+          delta: 0,
+          players: {}
+        };
+      }
+
+      if(!teams[g.team].players[g.name]){
+        teams[g.team].players[g.name] = {
+          name: g.name,
+          score: 0,
+          waffles: 0,
+          waffled: 0
+        };
+      }
+
+      const points = scoreGame(g.res,g.berserk,g.oppB);
+
+      teams[g.team].score += points;
+      teams[g.team].players[g.name].score += points;
+
+      if(g.res==="flag_win"){
+        teams[g.team].waffles++;
+        teams[g.team].players[g.name].waffles++;
+      }
+
+      if(g.res==="flag_loss"){
+        teams[g.team].waffled++;
+        teams[g.team].players[g.name].waffled++;
+      }
+    });
+
+    Object.values(teams).forEach(t=>{
+      t.delta = t.score - t.lastScore;
+    });
+
+    render(teams, index < TEAM_BATTLES.length - 1);
+  }
+
+  render(teams,false);
+
+  document.getElementById("lastUpdated").innerText =
+    "Last updated: "+new Date().toLocaleString();
+}
+
+buildTeamBoard();
+</script>
+</body>
+</html>
